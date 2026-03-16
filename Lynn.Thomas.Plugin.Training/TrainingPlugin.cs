@@ -2,47 +2,83 @@
 using System;
 // Imports the Dynamics SDK library, which provides the classes used to build plugins and interact with Dynamics records
 using Microsoft.Xrm.Sdk;
+
 // A namespace is used to organise code and keep classes grouped together in a project
 namespace Training.Plugin
 {
-    // public  → allows Dynamics to access and run this class
-    // class   → defines a container for our plugin code
-    // : IPlugin → indicates this class implements the Dynamics plugin interface
+    // Defines a plugin class called TrainingPlugin
+    // The class implements IPlugin, which is required for all Dynamics plugins
     public class TrainingPlugin : IPlugin
     {
-        // public  → allows Dynamics to access this method
-        // void    → the method performs actions but does not return a value
-        // Execute → the method that Dynamics calls when the plugin is triggered
-        // IServiceProvider serviceProvider → provides access to services like context and tracing
+        // The Execute method is the entry point for the plugin.
+        // Dynamics calls this method whenever the plugin is triggered.
+        // IServiceProvider allows us to request services from the Dynamics platform.
         public void Execute(IServiceProvider serviceProvider)
         {
-            // Get the plugin execution context from Dynamics
-            // This object contains details about the current operation, such as which message triggered the plugin
+            // STEP 1: Retrieve the tracing service.
+            // Tracing allows developers to write log messages that help debug plugin execution.
+            // These messages are stored in the Plugin Trace Log inside Dynamics.
+            var tracing = (ITracingService)
+                serviceProvider.GetService(typeof(ITracingService));
+
+                tracing.Trace("Plugin execution started.");
+
+            // STEP 2: Retrieve the plugin execution context.
+            // The context contains information about the event that triggered the plugin.
+            // For example:
+            // - which message occurred (Create / Update / Delete)
+            // - which entity was affected
+            // - which user performed the action
             var context = (IPluginExecutionContext)
                 serviceProvider.GetService(typeof(IPluginExecutionContext));
 
-            // InputParameters contains data sent to the plugin by Dynamics
-            // "Target" usually represents the record being created or updated
-            // If Target is not present, stop the plugin to prevent errors
+            // STEP 3: Prevent plugin recursion.
+            // Depth indicates how many times the plugin has executed during the same operation.
+            // If a plugin performs an update that triggers itself again, Depth increases.
+            // By exiting when Depth > 1, we prevent infinite loops.
+            if (context.Depth > 1)
+                return;
+
+            // STEP 4: Ensure the Target record exists.
+            // InputParameters is a collection of data passed to the plugin.
+            // The "Target" parameter typically contains the record involved in the operation.
+            // If Target is missing, we exit to avoid errors
             if (!context.InputParameters.Contains("Target"))
                 return;
 
-            // Get the "Target" record from the InputParameters collection
-            // Convert it to an Entity type so we can access its fields
+            // STEP 5: Retrieve the record involved in the operation.
+            // InputParameters works like a dictionary.
+            // The key "Target" contains the record being created or updated.
+            // We cast it to an Entity so we can work with it as a Dynamics record.
             var target = (Entity)context.InputParameters["Target"];
 
-            // target.Contains("name") → checks if the "name" field exists on the record
-            // This prevents errors because Update messages only include fields that changed
+            // Write a trace message so developers can see when the plugin starts running.
+            tracing.Trace("Plugin running");
+
+            // STEP 6: Check if the "name" field exists on the record.
+            // This is important because during an Update operation,
+            // Dynamics only sends fields that were changed.
             if (target.Contains("name"))
             {
-                // GetAttributeValue<string>() → retrieves the field value and converts it to a string
-                // "name" → the logical name of the field in Dynamics
+                // Retrieve the value of the name field.
+                // GetAttributeValue<T>() safely converts the field value to the specified type.
+                // In this case we expect the name field to be a string.
                 var name = target.GetAttributeValue<string>("name");
-            }
 
-            // Throw a plugin exception to stop the record from being saved
-            // The message provided will be shown to the user in Dynamics
-            throw new InvalidPluginExecutionException("Name is required.");
+                // string.IsNullOrWhiteSpace checks if the value is:
+                // - null
+                // - an empty string ""
+                // - a string containing only spaces
+                // This helps ensure the field contains meaningful data.
+                if (string.IsNullOrWhiteSpace(name))
+                {
+                    // Throwing an InvalidPluginExecutionException stops the operation.
+                    // Dynamics will display this message to the user.
+                    throw new InvalidPluginExecutionException("Name is required.");
+                }
+            }
+            // Trace message indicating the plugin finished successfully
+            tracing.Trace("Plugin execution completed.");
         }
     }
 }
